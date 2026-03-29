@@ -4,40 +4,23 @@ The MIT License (MIT)
 Copyright (c) 2017 Marvin Teichmann
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import os
 import sys
 
 import numpy as np
-import scipy as scp
 import math
 
 import logging
-import warnings
 
 logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s',
                     level=logging.INFO,
                     stream=sys.stdout)
-
-try:
-    import pyinn as P
-    has_pyinn = True
-except ImportError:
-    #  PyInn is required to use our cuda based message-passing implementation
-    #  Torch 0.4 provides a im2col operation, which will be used instead.
-    #  It is ~15% slower.
-    has_pyinn = False
-    pass
 
 from utils import test_utils
 
 import torch
 import torch.nn as nn
 from torch.nn import functional as nnfun
-from torch.autograd import Variable
 from torch.nn.parameter import Parameter
 
 import torch.nn.functional as F
@@ -74,8 +57,6 @@ default_conf = {
         'use_bias': False
     },
     "trainable_bias": False,
-
-    "pyinn": False
 }
 
 # Config used for test cases on 10 x 10 pixel greyscale inpu
@@ -120,7 +101,7 @@ class GaussCRF(nn.Module):
     """
 
     def __init__(self, conf, shape, nclasses=None, use_gpu=True):
-        super(GaussCRF, self).__init__()
+        super().__init__()
 
         self.conf = conf
         self.shape = shape
@@ -138,7 +119,7 @@ class GaussCRF(nn.Module):
                 self.register_parameter(name, Parameter(tensor))
         else:
             def register(name, tensor):
-                self.register_buffer(name, Variable(tensor))
+                self.register_buffer(name, tensor)
 
         register('pos_sdims', torch.Tensor([1 / conf['pos_feats']['sdims']]))
 
@@ -167,8 +148,7 @@ class GaussCRF(nn.Module):
             norm=conf['norm'], blur=conf['blur'], trainable=conf['trainable'],
             convcomp=conf['convcomp'], weight=weight,
             final_softmax=conf['final_softmax'],
-            unary_weight=conf['unary_weight'],
-            pyinn=conf['pyinn'])
+            unary_weight=conf['unary_weight'])
 
         return
 
@@ -227,7 +207,7 @@ class GaussCRF(nn.Module):
         if type(self.mesh) is Parameter:
             return torch.stack(bs * [self.mesh * sdims])
         else:
-            return torch.stack(bs * [Variable(self.mesh) * sdims])
+            return torch.stack(bs * [self.mesh * sdims])
 
 
 def show_memusage(device=0, name=""):
@@ -279,7 +259,7 @@ class MessagePassingCol():
     def __init__(self, feat_list, compat_list, merge, npixels, nclasses,
                  norm="sym",
                  filter_size=5, clip_edges=0, use_gpu=False,
-                 blur=1, matmul=False, verbose=False, pyinn=False):
+                 blur=1, matmul=False, verbose=False):
 
         if not norm == "sym" and not norm == "none":
             raise NotImplementedError
@@ -291,7 +271,6 @@ class MessagePassingCol():
         self.use_gpu = use_gpu
         self.verbose = verbose
         self.blur = blur
-        self.pyinn = pyinn
 
         self.merge = merge
 
@@ -323,7 +302,7 @@ class MessagePassingCol():
 
     def _get_norm(self, gaus):
         norm_tensor = torch.ones([1, 1, self.npixels[0], self.npixels[1]])
-        normalization_feats = torch.autograd.Variable(norm_tensor)
+        normalization_feats = norm_tensor
         if self.use_gpu:
             normalization_feats = normalization_feats.cuda()
 
@@ -361,7 +340,7 @@ class MessagePassingCol():
             bs, self.filter_size, self.filter_size,
             npixels[0], npixels[1]).fill_(0)
 
-        gaussian = Variable(gaussian_tensor)
+        gaussian = gaussian_tensor
 
         for dx in range(-span, span + 1):
             for dy in range(-span, span + 1):
@@ -422,22 +401,11 @@ class MessagePassingCol():
         if self.verbose:
             show_memusage(name="Init")
 
-        if self.pyinn:
-            input_col = P.im2col(input, self.filter_size, 1, self.span)
-        else:
-            # An alternative implementation of num2col.
-            #
-            # This has implementation uses the torch 0.4 im2col operation.
-            # This implementation was not avaible when we did the experiments
-            # published in our paper. So less "testing" has been done.
-            #
-            # It is around ~20% slower then the pyinn implementation but
-            # easier to use as it removes a dependency.
-            input_unfold = F.unfold(input, self.filter_size, 1, self.span)
-            input_unfold = input_unfold.view(
-                bs, num_channels, self.filter_size, self.filter_size,
-                npixels[0], npixels[1])
-            input_col = input_unfold
+        input_unfold = F.unfold(input, self.filter_size, 1, self.span)
+        input_unfold = input_unfold.view(
+            bs, num_channels, self.filter_size, self.filter_size,
+            npixels[0], npixels[1])
+        input_col = input_unfold
 
         k_sqr = self.filter_size * self.filter_size
 
@@ -460,12 +428,10 @@ class MessagePassingCol():
             in_0 = self.npixels[0]
             in_1 = self.npixels[1]
             message = message.view(bs, num_channels, npixels[0], npixels[1])
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                # Suppress warning regarding corner alignment
-                message = torch.nn.functional.upsample(message,
-                                                       scale_factor=self.blur,
-                                                       mode='bilinear')
+            message = F.interpolate(message,
+                                    scale_factor=self.blur,
+                                    mode='bilinear',
+                                    align_corners=False)
 
             message = message[:, :, pad_0:pad_0 + in_0, pad_1:in_1 + pad_1]
             message = message.contiguous()
@@ -493,10 +459,9 @@ class ConvCRF(nn.Module):
                  norm='sym', merge=False,
                  verbose=False, trainable=False,
                  convcomp=False, weight=None,
-                 final_softmax=True, unary_weight=10,
-                 pyinn=False):
+                 final_softmax=True, unary_weight=10):
 
-        super(ConvCRF, self).__init__()
+        super().__init__()
         self.nclasses = nclasses
 
         self.filter_size = filter_size
@@ -509,7 +474,6 @@ class ConvCRF(nn.Module):
         self.verbose = verbose
         self.blur = blur
         self.final_softmax = final_softmax
-        self.pyinn = pyinn
 
         self.conf = conf
 
@@ -534,7 +498,7 @@ class ConvCRF(nn.Module):
                 self.register_parameter(name, Parameter(tensor))
         else:
             def register(name, tensor):
-                self.register_buffer(name, Variable(tensor))
+                self.register_buffer(name, tensor)
 
         if weight is None:
             self.weight = None
@@ -566,8 +530,7 @@ class ConvCRF(nn.Module):
             use_gpu=self.use_gpu,
             norm=self.norm,
             verbose=self.verbose,
-            blur=self.blur,
-            pyinn=self.pyinn)
+            blur=self.blur)
 
     def inference(self, unary, num_iter=5):
 
@@ -575,7 +538,7 @@ class ConvCRF(nn.Module):
             lg_unary = torch.log(unary)
             prediction = exp_and_normalize(lg_unary, dim=1)
         else:
-            lg_unary = nnfun.log_softmax(unary, dim=1, _stacklevel=5)
+            lg_unary = nnfun.log_softmax(unary, dim=1)
             if self.conf['softmax'] and False:
                 prediction = exp_and_normalize(lg_unary, dim=1)
             else:
@@ -623,14 +586,14 @@ if __name__ == "__main__":
     img = test_utils._get_simple_img()
 
     img = np.transpose(img, [2, 0, 1])
-    img_torch = Variable(torch.Tensor(img), requires_grad=False).cuda()
+    img_torch = torch.from_numpy(img).float().cuda()
 
-    unary_var = Variable(torch.Tensor(unary)).cuda()
+    unary_var = torch.from_numpy(unary).float().cuda()
     unary_var = unary_var.view(2, 10, 10)
-    img_var = Variable(torch.Tensor(img)).cuda()
+    img_var = torch.from_numpy(img).float().cuda()
 
     prediction = tcrf.forward(unary_var, img_var).cpu().data.numpy()
     res = np.argmax(prediction, axis=0)
-    import scipy.misc
-    scp.misc.imsave("out.png", res)
+    import imageio
+    imageio.imwrite("out.png", res)
     # d.addPairwiseBilateral(2, 2, img, 3)

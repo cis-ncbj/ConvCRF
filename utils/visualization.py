@@ -4,16 +4,10 @@ The MIT License (MIT)
 Copyright (c) 2017 Marvin Teichmann
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import os
 import sys
 
 import numpy as np
-import scipy as scp
-
 import logging
 
 logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s',
@@ -25,7 +19,7 @@ class SegmentationVisualizer(object):
     """docstring for label_converter"""
     def __init__(self, color_list=None, name_list=None,
                  mode='RGB'):
-        super(SegmentationVisualizer, self).__init__()
+        super().__init__()
         self.color_list = color_list
         self.name_list = name_list
 

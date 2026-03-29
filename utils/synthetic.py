@@ -4,16 +4,10 @@ The MIT License (MIT)
 Copyright (c) 2017 Marvin Teichmann
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import os
 import sys
 
 import numpy as np
-import scipy as scp
-
 import logging
 
 import skimage

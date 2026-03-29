@@ -4,15 +4,10 @@ The MIT License (MIT)
 Copyright (c) 2017 Marvin Teichmann
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import os
 import sys
 
 import numpy as np
-import scipy as scp
 import math
 
 import logging
@@ -28,7 +23,6 @@ from pydensecrf.utils import create_pairwise_gaussian
 import torch
 import torch.nn as nn
 from torch.nn import functional as nnfun
-from torch.autograd import Variable
 from torch.nn.parameter import Parameter
 
 import gc
@@ -185,7 +179,7 @@ class FullCRF():
         """
         if softmax:
             unary = torch.nn.functional.softmax(
-                Variable(torch.Tensor(unary)), dim=2)
+                torch.from_numpy(unary).float(), dim=2)
             unary = unary.data.numpy()
         self.compute_lattice(img)
         return self.compute_dcrf(unary)

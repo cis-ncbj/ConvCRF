@@ -7,9 +7,6 @@ import sys
 import random
 
 import numpy as np
-import scipy as scp
-import scipy.misc
-
 try:
     import matplotlib.pyplot as plt
 except ImportError:
@@ -53,7 +50,7 @@ color_list = [(0, 0, 0),
 class PascalVisualizer(vis.SegmentationVisualizer):
 
     def __init__(self):
-        super(PascalVisualizer, self).__init__(
+        super().__init__(
             color_list=color_list, name_list=voc_names)
 
     def plot_sample(self, sample):

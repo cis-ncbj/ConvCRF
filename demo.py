@@ -4,10 +4,6 @@ The MIT License (MIT)
 Copyright (c) 2017 Marvin Teichmann
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import os
 import sys
 
@@ -24,7 +20,6 @@ import time
 from convcrf import convcrf
 
 import torch
-from torch.autograd import Variable
 
 from utils import pascal_visualizer as vis
 from utils import synthetic
@@ -45,18 +40,11 @@ logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s',
 
 def do_crf_inference(image, unary, args):
 
-    if args.pyinn or not hasattr(torch.nn.functional, 'unfold'):
-        # pytorch 0.3 or older requires pyinn.
-        args.pyinn = True
-        # Cheap and easy trick to make sure that pyinn is loadable.
-        import pyinn
-
     # get basic hyperparameters
     num_classes = unary.shape[2]
     shape = image.shape[0:2]
     config = convcrf.default_conf
     config['filter_size'] = 7
-    config['pyinn'] = args.pyinn
 
     if args.normalize:
         # Warning, applying image normalization affects CRF computation.
@@ -80,12 +68,12 @@ def do_crf_inference(image, unary, args):
     image = image.transpose(2, 0, 1)  # shape: [3, hight, width]
     # Add batch dimension to image: [1, 3, height, width]
     image = image.reshape([1, 3, shape[0], shape[1]])
-    img_var = Variable(torch.Tensor(image))
+    img_var = torch.from_numpy(image).float()
 
     unary = unary.transpose(2, 0, 1)  # shape: [3, hight, width]
     # Add batch dimension to unary: [1, 21, height, width]
     unary = unary.reshape([1, num_classes, shape[0], shape[1]])
-    unary_var = Variable(torch.Tensor(unary))
+    unary_var = torch.from_numpy(unary).float()
 
     logging.info("Build ConvCRF.")
     ##
@@ -211,10 +199,6 @@ def get_parser():
 
     parser.add_argument('--normalize', action='store_true',
                         help="Normalize input image before inference.")
-
-    parser.add_argument('--pyinn', action='store_true',
-                        help="Use pyinn based Cuda implementation"
-                             "for message passing.")
 
     parser.add_argument('--cpu', action='store_true',
                         help="Run on CPU instead of GPU.")
